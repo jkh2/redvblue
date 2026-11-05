@@ -1,245 +1,458 @@
-// Red v Blue game engine. Pure logic, no DOM. The build inlines this file
-// into index.html (dropping the `export` keywords); the simulator imports it.
-
-export const MODES = {
-  land:     { key: 'areaKm2',  label: 'Land',     blurb: 'Income follows square miles held.' },
-  counties: { key: 'counties', label: 'Counties', blurb: 'Income follows counties held.' },
-  ballots:  { key: 'ballots',  label: 'Voters',   blurb: 'Income follows 2024 ballots cast in the counties held.' },
-};
+// County war. The board is the 2026 governor map. The pieces are columns.
+// Only a column can attack, and only the county next door.
 
 export const RULES = {
-  startArmies: 3,     // every region starts with this many
-  baseIncome: 3,      // every side gets this each turn
-  pool: 30,           // armies split each turn by share of the mode's value
-  stateBonus: 1,      // per whole state held
+  columns: 8,
+  startStack: 8,
+  militia: 1,
+  battles: 2,
+  march: 6,
+  recruit: 8,
+  maxTurns: 12,
+  statePrize: 2,
 };
 
-export function mulberry32(seed) {
-  return function () {
-    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+export const other = (p) => (p === "R" ? "D" : "R");
+
+function dist(board, a, b) {
+  return Math.hypot(board.cx[a] - board.cx[b], board.cy[a] - board.cy[b]);
 }
 
-export const other = p => (p === 'R' ? 'D' : 'R');
-
-// A side collapses when it holds fewer than this many regions (10% of the map).
-export const collapseAt = g => Math.ceil(g.owner.length * 0.1);
-
-export function newGame(data, mode = 'land', opts = {}) {
-  const rng = opts.rng || Math.random;
-  const g = {
-    data, mode, rng,
-    owner: data.regions.map(r => r.party),
-    armies: data.regions.map(() => RULES.startArmies),
-    turn: 1,
-    player: opts.first || 'R',
-    phase: 'reinforce',
-    reserve: 0,
-    fortified: false,
-    winner: null,
-    log: [],
-    total: data.regions.reduce((s, r) => s + r[MODES[mode].key], 0),
-  };
-  g.reserve = income(g, g.player).total;
-  return g;
-}
-
-export function valueOf(g, i) { return g.data.regions[i][MODES[g.mode].key]; }
-
-export function share(g, p) {
-  let s = 0;
-  for (let i = 0; i < g.owner.length; i++) if (g.owner[i] === p) s += valueOf(g, i);
-  return s / g.total;
-}
-
-export function wholeStates(g, p) {
-  const out = [];
-  for (const [st, ids] of Object.entries(g.data.states)) if (ids.every(i => g.owner[i] === p)) out.push(st);
-  return out;
-}
-
-export function income(g, p) {
-  const sh = share(g, p);
-  const fromShare = Math.round(RULES.pool * sh);
-  const states = wholeStates(g, p);
-  const bonus = states.length * RULES.stateBonus;
-  return { base: RULES.baseIncome, fromShare, bonus, states, share: sh, total: RULES.baseIncome + fromShare + bonus };
-}
-
-export function counts(g) {
-  const c = { R: { regions: 0, armies: 0 }, D: { regions: 0, armies: 0 } };
-  g.owner.forEach((p, i) => { c[p].regions++; c[p].armies += g.armies[i]; });
-  return c;
-}
-
-export function adj(g, i) { return g.data.regions[i].adj; }
-
-export function place(g, i, n) {
-  if (g.phase !== 'reinforce' || g.owner[i] !== g.player) return 0;
-  n = Math.min(n, g.reserve);
-  g.armies[i] += n; g.reserve -= n;
-  if (g.reserve === 0) g.phase = 'attack';
-  return n;
-}
-
-export function canAttack(g, from, to) {
-  return g.phase === 'attack' && g.owner[from] === g.player && g.owner[to] !== g.player &&
-    g.armies[from] >= 2 && adj(g, from).includes(to);
+export function deploy(board) {
+  const chosen = { R: [], D: [] };
+  const { adj, party } = board;
+  for (const side of ["R", "D"]) {
+    const cands = [];
+    for (let i = 0; i < party.length; i++) {
+      if (party[i] !== side) continue;
+      let enemy = 0;
+      for (const j of adj[i]) if (party[j] !== side) enemy++;
+      if (enemy) cands.push([enemy, i]);
+    }
+    cands.sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+    for (const min of [12, 8, 5, 3, 1.5, 0]) {
+      for (const [, i] of cands) {
+        if (chosen[side].length >= RULES.columns) break;
+        if (chosen[side].some((k) => dist(board, k, i) < min)) continue;
+        chosen[side].push(i);
+      }
+    }
+  }
+  return chosen;
 }
 
 function rollDice(rng, n) {
   const d = [];
   for (let k = 0; k < n; k++) d.push(1 + Math.floor(rng() * 6));
-  return d.sort((a, b) => b - a);
+  d.sort((a, b) => b - a);
+  return d;
 }
 
-// One Risk-style exchange: attacker rolls up to 3, defender up to 2,
-// highest dice compared pairwise, ties go to the defender.
-export function roll(g, from, to) {
-  const a = rollDice(g.rng, Math.min(3, g.armies[from] - 1));
-  const d = rollDice(g.rng, Math.min(2, g.armies[to]));
-  let lostA = 0, lostD = 0;
-  for (let k = 0; k < Math.min(a.length, d.length); k++) (a[k] > d[k] ? lostD++ : lostA++);
-  g.armies[from] -= lostA; g.armies[to] -= lostD;
-  return { a, d, lostA, lostD };
-}
+const CHANCE = new Map();
 
-// Keep rolling until the defender falls or the attacker is down to one.
-export function blitz(g, from, to) {
-  if (!canAttack(g, from, to)) return null;
-  const startA = g.armies[from], startD = g.armies[to];
-  const rolls = [];
-  while (g.armies[from] >= 2 && g.armies[to] > 0) rolls.push(roll(g, from, to));
-  const result = { from, to, rolls, startA, startD, lostA: startA - g.armies[from], lostD: startD, captured: false };
-  result.lostD = startD - g.armies[to];
-  if (g.armies[to] === 0) {
-    const loser = g.owner[to];
-    g.owner[to] = g.player;
-    const move = g.armies[from] - 1;            // march everyone but one in
-    g.armies[to] = move; g.armies[from] = 1;
-    result.captured = true; result.moved = move;
-    const left = g.owner.reduce((n, p) => n + (p === loser), 0);
-    if (left < collapseAt(g)) { g.winner = g.player; g.phase = 'over'; }
+export function chance(atk, def) {
+  const a = Math.max(1, Math.min(36, atk | 0));
+  const d = Math.max(1, Math.min(36, def | 0));
+  const key = a * 40 + d;
+  const hit = CHANCE.get(key);
+  if (hit != null) return hit;
+  let wins = 0;
+  const trials = 80;
+  for (let t = 0; t < trials; t++) {
+    let aa = a;
+    let dd = d;
+    let seed = (key * 997 + t * 131) >>> 0;
+    const rng = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    while (aa >= 2 && dd > 0) {
+      const ad = rollDice(rng, Math.min(3, aa - 1));
+      const ddice = rollDice(rng, Math.min(2, dd));
+      const n = Math.min(ad.length, ddice.length);
+      for (let k = 0; k < n; k++) {
+        if (ad[k] > ddice[k]) dd--;
+        else aa--;
+      }
+    }
+    if (dd <= 0) wins++;
   }
-  g.log.push(result);
-  return result;
+  const rate = wins / trials;
+  CHANCE.set(key, rate);
+  return rate;
 }
 
-export function endAttacks(g) { if (g.phase === 'attack') g.phase = 'fortify'; }
-
-// Fortify: once per turn, along a chain of your own regions.
-export function ownPath(g, from, to) {
-  if (g.owner[from] !== g.owner[to]) return false;
-  const p = g.owner[from], seen = new Set([from]), q = [from];
-  while (q.length) {
-    const k = q.pop(); if (k === to) return true;
-    for (const j of adj(g, k)) if (!seen.has(j) && g.owner[j] === p) { seen.add(j); q.push(j); }
+export function newGame(board, human) {
+  const n = board.party.length;
+  const owner = board.party.slice();
+  const armies = new Array(n).fill(RULES.militia);
+  const dudeAt = new Array(n).fill(null);
+  const posts = deploy(board);
+  let nextId = 1;
+  for (const side of ["R", "D"]) {
+    for (const i of posts[side]) {
+      dudeAt[i] = { id: nextId++, side, battles: RULES.battles, marched: false };
+      armies[i] = RULES.startStack;
+    }
   }
-  return false;
+  const g = {
+    board,
+    owner,
+    armies,
+    dudeAt,
+    human,
+    turn: 1,
+    player: human,
+    phase: "raise",
+    reserve: RULES.recruit,
+    taken: { R: 0, D: 0 },
+    winner: null,
+    reason: "",
+    log: [],
+    rng: Math.random,
+  };
+  note(g, "The columns are on the front.");
+  return g;
 }
 
-export function fortify(g, from, to, n) {
-  if (g.phase !== 'fortify' && g.phase !== 'attack') return false;
-  if (from === to || g.owner[from] !== g.player || !ownPath(g, from, to)) return false;
-  n = Math.max(0, Math.min(n, g.armies[from] - 1));
-  if (!n) return false;
-  g.armies[from] -= n; g.armies[to] += n; g.fortified = true;
-  endTurn(g);
+function note(g, text) {
+  g.log.unshift(text);
+  if (g.log.length > 8) g.log.pop();
+}
+
+export function columnsOf(g, side) {
+  let n = 0;
+  for (const d of g.dudeAt) if (d && d.side === side) n++;
+  return n;
+}
+
+export function wholeStates(g) {
+  const bag = new Map();
+  const st = g.board.st;
+  for (let i = 0; i < st.length; i++) {
+    const code = st[i];
+    let row = bag.get(code);
+    if (!row) {
+      row = { n: 0, R: 0, D: 0 };
+      bag.set(code, row);
+    }
+    row.n++;
+    row[g.owner[i]]++;
+  }
+  let R = 0;
+  let D = 0;
+  for (const row of bag.values()) {
+    if (row.R === row.n) R++;
+    else if (row.D === row.n) D++;
+  }
+  return { R, D };
+}
+
+const STATE = {
+  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
+  CO: "Colorado", CT: "Connecticut", DE: "Delaware", DC: "the District", FL: "Florida",
+  GA: "Georgia", HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa",
+  KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland",
+  MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri",
+  MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey",
+  NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio",
+  OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina",
+  SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia",
+  WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+};
+
+function stateName(code) {
+  return STATE[code] || code;
+}
+
+function stateSwept(g, code, side) {
+  const st = g.board.st;
+  for (let i = 0; i < st.length; i++) {
+    if (st[i] === code && g.owner[i] !== side) return false;
+  }
   return true;
 }
 
-export function endTurn(g) {
-  if (g.phase === 'over') return;
-  g.player = other(g.player);
-  if (g.player === 'R') g.turn++;
-  g.phase = 'reinforce'; g.fortified = false;
-  g.reserve = income(g, g.player).total;
+export function place(g, i, n) {
+  if (g.phase !== "raise" || g.winner) return 0;
+  const dude = g.dudeAt[i];
+  if (!dude || dude.side !== g.player) return 0;
+  n = Math.max(0, Math.min(n | 0, g.reserve));
+  if (!n) return 0;
+  g.armies[i] += n;
+  g.reserve -= n;
+  return n;
 }
 
-// ---------------------------------------------------------------- AI ----
-
-export function isBorder(g, i) { return adj(g, i).some(j => g.owner[j] !== g.owner[i]); }
-
-// How much an AI wants region j: its value plus a nudge for finishing a state.
-function targetWorth(g, j) {
-  const meanVal = g.total / g.owner.length;
-  let w = valueOf(g, j) / meanVal;
-  const st = g.data.regions[j].st, ids = g.data.states[st];
-  const missing = ids.filter(k => g.owner[k] !== g.player).length;
-  if (missing === 1 && ids.length > 1) w += 2.5;           // completes a state
-  if (ids.length > 1 && missing === ids.length) w += 0;    // no bonus yet
-  // breaking the enemy's whole state is worth something too
-  if (ids.every(k => g.owner[k] === other(g.player))) w += 1;
-  return Math.min(w, 6) + 0.5;
+export function dumpReserve(g) {
+  if (g.phase !== "raise") return;
+  if (g.reserve) {
+    let best = -1;
+    for (let i = 0; i < g.dudeAt.length; i++) {
+      const d = g.dudeAt[i];
+      if (!d || d.side !== g.player) continue;
+      if (best < 0 || g.armies[i] > g.armies[best]) best = i;
+    }
+    if (best >= 0) place(g, best, g.reserve);
+  }
+  g.phase = "fight";
 }
 
-export function aiReinforce(g) {
-  const me = g.player;
-  while (g.reserve > 0) {
-    let best = -1, bestScore = -Infinity;
-    for (let i = 0; i < g.owner.length; i++) {
-      if (g.owner[i] !== me || !isBorder(g, i)) continue;
-      let s = -Infinity;
-      for (const j of adj(g, i)) {
-        if (g.owner[j] === me) continue;
-        // favor stacks that can take a valuable neighbor soon
-        const need = g.armies[j] + 2 - g.armies[i];
-        s = Math.max(s, targetWorth(g, j) * 3 - Math.max(0, need) * 0.25);
+export function canFight(g, from, to) {
+  const dude = g.dudeAt[from];
+  if (!dude || g.phase !== "fight" || g.winner) return false;
+  if (dude.side !== g.player || dude.battles <= 0) return false;
+  if (g.armies[from] < 2) return false;
+  if (g.owner[to] === g.player) return false;
+  return g.board.adj[from].includes(to);
+}
+
+export function fight(g, from, to) {
+  if (!canFight(g, from, to)) return null;
+  const dude = g.dudeAt[from];
+  const startA = g.armies[from];
+  const startD = g.armies[to];
+  const enemyDude = g.dudeAt[to];
+  while (g.armies[from] >= 2 && g.armies[to] > 0) {
+    const a = rollDice(g.rng, Math.min(3, g.armies[from] - 1));
+    const d = rollDice(g.rng, Math.min(2, g.armies[to]));
+    const n = Math.min(a.length, d.length);
+    for (let k = 0; k < n; k++) {
+      if (a[k] > d[k]) g.armies[to]--;
+      else g.armies[from]--;
+    }
+  }
+  dude.battles -= 1;
+  const name = g.board.names[to];
+  const code = g.board.st[to];
+  if (g.armies[to] > 0) {
+    note(g, `Held at ${name}, ${code}. ${startA} against ${startD}.`);
+    return { captured: false, from, to };
+  }
+  g.owner[to] = g.player;
+  g.taken[g.player] += 1;
+  const moved = g.armies[from] - 1;
+  g.armies[from] = RULES.militia;
+  g.armies[to] = moved;
+  g.dudeAt[from] = null;
+  g.dudeAt[to] = dude;
+  if (enemyDude) note(g, `Column broken at ${name}, ${code}.`);
+  else note(g, `Took ${name}, ${code}.`);
+  if (stateSwept(g, code, g.player)) {
+    g.armies[to] += RULES.statePrize;
+    note(g, `${stateName(code)} is yours. The column is reinforced.`);
+  }
+  if (columnsOf(g, other(g.player)) === 0) {
+    g.winner = g.player;
+    g.reason = "Every enemy column is broken.";
+    g.phase = "over";
+  }
+  return { captured: true, from, to };
+}
+
+export function reach(g, from) {
+  const dude = g.dudeAt[from];
+  const out = new Map();
+  if (!dude || dude.side !== g.player || dude.marched || g.phase !== "march") return out;
+  const side = g.player;
+  let edge = [from];
+  const seen = new Set([from]);
+  for (let depth = 1; depth <= RULES.march; depth++) {
+    const next = [];
+    for (const i of edge) {
+      for (const j of g.board.adj[i]) {
+        if (seen.has(j) || g.owner[j] !== side) continue;
+        seen.add(j);
+        if (!g.dudeAt[j]) out.set(j, depth);
+        next.push(j);
       }
-      const threat = adj(g, i).reduce((t, j) => t + (g.owner[j] !== me ? g.armies[j] : 0), 0) - g.armies[i];
-      s += Math.max(0, threat) * 0.05 + g.rng() * 0.3;
-      if (s > bestScore) { bestScore = s; best = i; }
     }
-    if (best < 0) best = g.owner.indexOf(me);
-    place(g, best, Math.min(g.reserve, Math.max(1, Math.ceil(g.reserve / 3))));
+    edge = next;
+  }
+  return out;
+}
+
+export function march(g, from, to) {
+  if (g.phase !== "march" || g.winner) return false;
+  const dude = g.dudeAt[from];
+  if (!dude || dude.side !== g.player || dude.marched) return false;
+  if (g.armies[from] < 2) return false;
+  if (!reach(g, from).has(to)) return false;
+  const n = g.armies[from] - 1;
+  g.armies[from] = RULES.militia;
+  g.armies[to] += n;
+  dude.marched = true;
+  g.dudeAt[from] = null;
+  g.dudeAt[to] = dude;
+  note(g, `Marched to ${g.board.names[to]}, ${g.board.st[to]}.`);
+  return true;
+}
+
+function judge(g) {
+  if (g.taken.R !== g.taken.D) return g.taken.R > g.taken.D ? "R" : "D";
+  const cR = columnsOf(g, "R");
+  const cD = columnsOf(g, "D");
+  if (cR !== cD) return cR > cD ? "R" : "D";
+  return g.human;
+}
+
+export function endPhase(g) {
+  if (g.winner) return;
+  if (g.phase === "raise") {
+    dumpReserve(g);
+    return;
+  }
+  if (g.phase === "fight") {
+    g.phase = "march";
+    return;
+  }
+  if (g.phase === "march") endTurn(g);
+}
+
+function refresh(g, side) {
+  for (const dude of g.dudeAt) {
+    if (!dude || dude.side !== side) continue;
+    dude.battles = RULES.battles;
+    dude.marched = false;
   }
 }
 
-export function aiAttackStep(g) {
-  // returns the blitz result, or null when the AI is done attacking
-  let best = null, bestScore = 0;
-  for (let i = 0; i < g.owner.length; i++) {
-    if (g.owner[i] !== g.player || g.armies[i] < 3) continue;
-    for (const j of adj(g, i)) {
-      if (g.owner[j] === g.player) continue;
-      const ratio = (g.armies[i] - 1) / (g.armies[j] + 1);
-      if (ratio < 1.1) continue;
-      const score = ratio * targetWorth(g, j);
-      if (score > bestScore) { bestScore = score; best = [i, j]; }
-    }
+export function endTurn(g) {
+  if (g.winner) return;
+  const nxt = other(g.player);
+  if (nxt === g.human && g.turn >= RULES.maxTurns) {
+    g.winner = judge(g);
+    g.reason = "Twelve turns. The side that took more counties.";
+    g.phase = "over";
+    return;
   }
-  return best ? blitz(g, best[0], best[1]) : null;
+  if (nxt === g.human) g.turn += 1;
+  g.player = nxt;
+  g.phase = "raise";
+  g.reserve = RULES.recruit;
+  refresh(g, nxt);
 }
 
-export function aiFortify(g) {
-  const me = g.player;
-  // biggest stack with no enemy neighbors walks to the nearest border region
-  let src = -1;
-  for (let i = 0; i < g.owner.length; i++)
-    if (g.owner[i] === me && g.armies[i] > 1 && !isBorder(g, i) && (src < 0 || g.armies[i] > g.armies[src])) src = i;
-  if (src < 0) { endTurn(g); return; }
-  const prev = new Map([[src, -1]]), q = [src];
-  let dest = -1;
-  while (q.length && dest < 0) {
-    const k = q.shift();
-    for (const j of adj(g, k)) {
-      if (prev.has(j) || g.owner[j] !== me) continue;
-      prev.set(j, k);
-      if (isBorder(g, j)) { dest = j; break; }
-      q.push(j);
+function bestColumn(g, scoreFn) {
+  let best = -1;
+  let bestScore = -Infinity;
+  for (let i = 0; i < g.dudeAt.length; i++) {
+    const d = g.dudeAt[i];
+    if (!d || d.side !== g.player) continue;
+    const s = scoreFn(i, d);
+    if (s > bestScore) {
+      bestScore = s;
+      best = i;
     }
   }
-  if (dest < 0) { endTurn(g); return; }
-  fortify(g, src, dest, g.armies[src] - 1);
+  return best;
 }
 
-export function aiTurn(g, maxAttacks = 400) {
-  aiReinforce(g);
-  for (let k = 0; k < maxAttacks && g.phase === 'attack'; k++) if (!aiAttackStep(g)) break;
-  if (g.phase === 'over') return;
-  endAttacks(g);
-  aiFortify(g);
+function enemyTouch(g, i) {
+  const side = g.owner[i];
+  let militia = 0;
+  let dudes = 0;
+  for (const j of g.board.adj[i]) {
+    if (g.owner[j] === side) continue;
+    if (g.dudeAt[j]) dudes++;
+    else militia++;
+  }
+  return { militia, dudes };
+}
+
+function enemyColumnDist(g) {
+  const dist = new Array(g.owner.length).fill(99);
+  let edge = [];
+  for (let i = 0; i < g.dudeAt.length; i++) {
+    const d = g.dudeAt[i];
+    if (d && d.side !== g.player) {
+      dist[i] = 0;
+      edge.push(i);
+    }
+  }
+  for (let depth = 1; edge.length && depth < 8; depth++) {
+    const next = [];
+    for (const i of edge) {
+      for (const j of g.board.adj[i]) {
+        if (dist[j] <= depth) continue;
+        dist[j] = depth;
+        next.push(j);
+      }
+    }
+    edge = next;
+  }
+  return dist;
+}
+
+export function aiStep(g) {
+  if (g.winner) return "over";
+  const heat = enemyColumnDist(g);
+  if (g.phase === "raise") {
+    const i = bestColumn(g, (idx) => {
+      const t = enemyTouch(g, idx);
+      return t.dudes * 8 + t.militia + (12 - Math.min(12, heat[idx])) * 2;
+    });
+    if (i >= 0) place(g, i, g.reserve);
+    g.phase = "fight";
+    return "raise";
+  }
+  if (g.phase === "fight") {
+    let best = null;
+    let bestScore = 0;
+    for (let i = 0; i < g.dudeAt.length; i++) {
+      const d = g.dudeAt[i];
+      if (!d || d.side !== g.player || d.battles <= 0 || g.armies[i] < 2) continue;
+      for (const j of g.board.adj[i]) {
+        if (g.owner[j] === g.player) continue;
+        const odds = chance(g.armies[i], g.armies[j]);
+        const kills = g.dudeAt[j] ? 1 : 0;
+        if (kills && odds < 0.55) continue;
+        if (!kills && odds < 0.7) continue;
+        const close = Math.max(0, 6 - heat[j]);
+        const score = odds * (1 + kills * 8 + close);
+        if (score > bestScore) {
+          bestScore = score;
+          best = [i, j];
+        }
+      }
+    }
+    if (!best) {
+      g.phase = "march";
+      return "hold";
+    }
+    fight(g, best[0], best[1]);
+    return "fight";
+  }
+  let marched = false;
+  for (let i = 0; i < g.dudeAt.length; i++) {
+    const d = g.dudeAt[i];
+    if (!d || d.side !== g.player || d.marched || g.armies[i] < 2) continue;
+    if (heat[i] <= 1) continue;
+    const spots = reach(g, i);
+    let dest = -1;
+    let destHeat = heat[i];
+    for (const [j] of spots) {
+      if (heat[j] < destHeat) {
+        destHeat = heat[j];
+        dest = j;
+      }
+    }
+    if (dest >= 0) {
+      march(g, i, dest);
+      marched = true;
+      break;
+    }
+  }
+  if (!marched) {
+    endTurn(g);
+    return "end";
+  }
+  return "march";
+}
+
+export function fightTargets(g, from) {
+  if (g.phase !== "fight") return [];
+  const dude = g.dudeAt[from];
+  if (!dude || dude.side !== g.player || dude.battles <= 0 || g.armies[from] < 2) return [];
+  return g.board.adj[from].filter((j) => g.owner[j] !== g.player);
 }

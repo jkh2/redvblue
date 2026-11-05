@@ -1,20 +1,46 @@
-// AI vs AI balance check: node build/sim.mjs [gamesPerMode]
-import fs from 'fs';
-import * as E from '../src/engine.js';
+import { readFileSync } from "node:fs";
+import { newGame, aiStep, columnsOf, deploy } from "../src/engine.js";
 
-const data = JSON.parse(fs.readFileSync(new URL('../data/regions.json', import.meta.url)));
-const N = +(process.argv[2] || 40);
-const MAX_TURNS = 300;
-
-for (const mode of Object.keys(E.MODES)) {
-  const wins = { R: 0, D: 0, none: 0 }, turns = [];
-  let firstIncome;
-  for (let n = 0; n < N; n++) {
-    const g = E.newGame(data, mode, { rng: E.mulberry32(1000 + n), first: n % 2 ? 'D' : 'R' });
-    if (!firstIncome) firstIncome = { R: E.income(g, 'R').total, D: E.income(g, 'D').total };
-    while (!g.winner && g.turn <= MAX_TURNS) E.aiTurn(g);
-    if (g.winner) { wins[g.winner]++; turns.push(g.turn); } else wins.none++;
-  }
-  turns.sort((a, b) => a - b);
-  console.log(`${mode.padEnd(8)} income R${firstIncome.R}/D${firstIncome.D}  wins R ${wins.R}  D ${wins.D}  unfinished ${wins.none}  median turns ${turns[turns.length >> 1] ?? '-'}`);
+const board = JSON.parse(readFileSync(new URL("../data/board.json", import.meta.url), "utf8"));
+const posts = deploy(board);
+for (const side of ["R", "D"]) {
+  console.log(
+    side,
+    posts[side].map((i) => `${board.names[i]}, ${board.st[i]}`).join(" · "),
+  );
 }
+
+function play(first) {
+  const g = newGame(board, first);
+  let guard = 0;
+  while (!g.winner && guard++ < 4000) aiStep(g);
+  return g;
+}
+
+const wins = { R: 0, D: 0 };
+let turns = 0;
+let takenR = 0;
+let takenD = 0;
+const N = 40;
+for (let i = 0; i < N; i++) {
+  const g = play(i % 2 ? "R" : "D");
+  wins[g.winner]++;
+  turns += g.turn;
+  takenR += g.taken.R;
+  takenD += g.taken.D;
+  if (i < 3) {
+    console.log(
+      "sample",
+      g.winner,
+      g.reason,
+      "turn",
+      g.turn,
+      "taken",
+      g.taken,
+      "columns",
+      columnsOf(g, "R"),
+      columnsOf(g, "D"),
+    );
+  }
+}
+console.log("wins", wins, "avg turn", (turns / N).toFixed(1), "avg taken", (takenR / N).toFixed(1), (takenD / N).toFixed(1));

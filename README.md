@@ -1,40 +1,27 @@
 # Red v Blue
 
-A territory strategy game on the 2024 U.S. county map.
+A county war on the map the 2026 midterm just drew.
+
+Every county starts with the party that won that state's governor's office. Texas, Georgia, Ohio, Iowa, and Nevada changed hands. Alaska and Kansas were not called on November 5, so they start with whoever was leading. Winners are not sworn in until January. This is the board the election made, not the offices people still sit in.
+
+You do not get a state for winning it. You take it one county at a time.
 
 **[Play Red v Blue](https://redvblue-zeta.vercel.app/)**
 
-Every county takes the color of the party that won it in the 2024 presidential race. Within each state, neighboring counties that voted the same way are merged into one region, giving 246 regions: 66 red and 180 blue. Both sides play by identical rules. The one setting that changes is what the land pays:
+## How a turn goes
 
-| Income by | Red share at start | Computer vs computer (60 games) |
-|-----------|-------------------|----------------------------------|
-| Land      | 88%               | Red 60, Blue 0                   |
-| Counties  | 86%               | Red 58, Blue 2                   |
-| Voters    | 51%               | Red 6, Blue 54                   |
+Eight columns a side, set on the real front. Both sides raise eight armies a turn.
 
-## Rules
+1. Put the armies on your columns.
+2. Fight. A column may enter two neighboring enemy counties. Risk dice, up to 3 against 2, ties to the defender. An empty county is a militia of one. Take it and the column walks in, leaving one behind. Break an enemy column and it is gone.
+3. March. Each column may walk up to six counties through your own ground.
 
-- Every region starts with 3 armies.
-- Each turn a side gets 3 armies, plus its share of 30 by the chosen income measure, plus 1 per whole state held.
-- Drag from your region onto a neighbor to attack. Risk-style dice: up to 3 attacking dice against up to 2 defending, ties to the defender. A drag keeps rolling until one side breaks.
-- Once per turn, move armies between two of your regions connected through your own territory. Moving ends the turn.
-- A side holding fewer than 25 regions (10% of the map) collapses.
+Finish a whole state and that column is reinforced. Break every enemy column and you win. Otherwise, after twelve turns, the side that took more counties wins.
+
+Drag to pan. Scroll to zoom. Click a column, then the county you want.
 
 ## Data
 
-- County results: [tonmcg/US_County_Level_Election_Results_08-24](https://github.com/tonmcg/US_County_Level_Election_Results_08-24) (2024 presidential).
-- Shapes: U.S. Census Bureau cartographic boundaries via [us-atlas](https://github.com/topojson/us-atlas).
-- Alaska and Connecticut don't report presidential results by county, so each is one statewide region. Kalawao County, HI is counted with Maui.
-
-## Building
-
-`index.html` is the whole game and is committed ready to serve. To rebuild it:
-
-```
-npm install
-node build/data.mjs     # data/county2024.csv + us-atlas -> data/regions.json
-node build/build.mjs    # engine + data + AI-vs-AI results -> index.html
-node build/sim.mjs 60   # balance check only
-```
-
-Source: `src/engine.js` (rules and computer player) and `src/index.template.html` (the page).
+- Counties: U.S. Census Bureau 2023 cartographic boundaries, the same file Held Ground uses.
+- Governor's offices: called results as of 2:00 p.m. ET, November 5, 2026, plus the leader in Alaska (Jonathan Kreiss-Tomkins) and Kansas (Cindy Holscher).
+- Rebuild the board with `node build/board.mjs` after `npm install`. The page itself is static.
