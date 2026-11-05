@@ -1,0 +1,759 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Red v Blue</title>
+<meta name="description" content="A territory strategy game on the 2024 county map. Same rules for both sides; you choose what the land pays.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M2 6h14v20H2z' fill='%23c4362c'/%3E%3Cpath d='M16 6h14v20H16z' fill='%232f5cb8'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#dfe3dc;      /* survey-sheet grey-green */
+  --paper-2:#eef0eb;
+  --ink:#1c2229;
+  --ink-2:#4b545d;
+  --rule:#b4bbb3;
+  --red:#c4362c;
+  --red-deep:#8e2219;
+  --blue:#2f5cb8;
+  --blue-deep:#1d3d82;
+  --brass:#d99a1e;
+  --water:#cdd6d6;
+  --shadow:0 1px 0 rgba(28,34,41,.08), 0 6px 18px rgba(28,34,41,.14);
+  --cond:'Barlow Condensed', 'Arial Narrow', sans-serif;
+  --serif:'Source Serif 4', Georgia, serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--serif);font-size:16px;line-height:1.5;overflow:hidden;-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--brass);outline-offset:2px}
+
+/* ---------- layout ---------- */
+.app{display:grid;grid-template-rows:auto 1fr auto;height:100dvh}
+header.score{display:grid;grid-template-columns:1fr minmax(260px,2fr) 1fr;align-items:center;gap:16px;padding:10px 16px 8px;background:var(--paper-2);border-bottom:1px solid var(--rule)}
+.side{display:flex;flex-direction:column;font-family:var(--cond);line-height:1.1}
+.side.D{text-align:right;align-items:flex-end}
+.side .who{font-weight:700;font-size:22px;letter-spacing:.01em}
+.side.R .who{color:var(--red)} .side.D .who{color:var(--blue)}
+.side .nums{font-size:15px;color:var(--ink-2);font-weight:500}
+.side .nums b{color:var(--ink);font-weight:600}
+.side.turn .who::after{content:'';display:inline-block;width:9px;height:9px;border-radius:50%;background:currentColor;margin:0 6px;vertical-align:3px}
+.side.D.turn .who::after{margin:0 6px 0 6px}
+.mid{display:flex;flex-direction:column;align-items:stretch;gap:3px}
+.mid .title{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--cond);font-size:15px;color:var(--ink-2)}
+.mid .title strong{font-size:20px;color:var(--ink);font-weight:700;letter-spacing:.02em}
+.tug{position:relative;height:22px;border-radius:3px;overflow:hidden;display:flex;background:var(--rule)}
+.tug span{display:flex;align-items:center;font-family:var(--cond);font-weight:600;font-size:15px;color:#fff;transition:flex-basis .6s cubic-bezier(.2,.8,.2,1);white-space:nowrap;overflow:hidden}
+.tug .r{background:var(--red);padding-left:8px}
+.tug .d{background:var(--blue);justify-content:flex-end;padding-right:8px}
+.tug::after{content:'';position:absolute;left:50%;top:-2px;bottom:-2px;width:2px;background:var(--paper-2)}
+@media (prefers-reduced-motion:reduce){.tug span{transition:none}}
+
+main{position:relative;overflow:hidden;background:var(--water);touch-action:none}
+svg#map{width:100%;height:100%;display:block;cursor:grab;user-select:none}
+svg#map.dragging{cursor:grabbing}
+.region{stroke:var(--paper-2);stroke-width:.6;vector-effect:non-scaling-stroke;stroke-linejoin:round;transition:filter .15s}
+.region.R{fill:var(--red)} .region.D{fill:var(--blue)}
+.region.flip.R{fill:url(#flipR)} .region.flip.D{fill:url(#flipD)}
+.region:hover{filter:brightness(1.12)}
+.region.sel{stroke:var(--brass);stroke-width:3}
+.region.tgt{stroke:var(--brass);stroke-width:2;stroke-dasharray:4 3}
+.region.dim{filter:saturate(.35) brightness(1.15)}
+#states{fill:none;stroke:var(--ink);stroke-opacity:.45;stroke-width:1;vector-effect:non-scaling-stroke;pointer-events:none}
+#nation{fill:none;stroke:var(--ink);stroke-opacity:.55;stroke-width:1.2;vector-effect:non-scaling-stroke;pointer-events:none}
+#links line{stroke:var(--ink);stroke-opacity:.55;stroke-width:1;stroke-dasharray:3 3;vector-effect:non-scaling-stroke}
+.badge circle{stroke:#fff;stroke-width:1.2;vector-effect:non-scaling-stroke}
+.badge.R circle{fill:var(--red-deep)} .badge.D circle{fill:var(--blue-deep)}
+.badge text{font-family:var(--cond);font-weight:600;fill:#fff;text-anchor:middle;dominant-baseline:central;pointer-events:none}
+.badge.sel circle{stroke:var(--brass);stroke-width:2.5}
+.badge.pulse circle{animation:pulse .5s ease-out}
+@keyframes pulse{0%{stroke:var(--brass);stroke-width:6}100%{stroke:#fff;stroke-width:1.2}}
+#arrow{stroke:var(--brass);stroke-width:3.5;vector-effect:non-scaling-stroke;stroke-linecap:round;pointer-events:none;marker-end:url(#head)}
+#aiArrow{stroke:var(--ink);stroke-width:3;vector-effect:non-scaling-stroke;stroke-linecap:round;pointer-events:none;marker-end:url(#headInk);opacity:.85}
+
+/* floating cards */
+.card{position:absolute;background:var(--paper-2);border:1px solid var(--rule);border-radius:6px;box-shadow:var(--shadow)}
+#info{left:12px;top:12px;min-width:220px;max-width:280px;padding:10px 12px;pointer-events:none;opacity:0;transition:opacity .15s}
+#info.on{opacity:1}
+#info .nm{font-family:var(--cond);font-size:21px;font-weight:700;line-height:1.1}
+#info .hold{font-family:var(--cond);font-size:16px;font-weight:600}
+#info .hold.R{color:var(--red)} #info .hold.D{color:var(--blue)}
+#info dl{display:grid;grid-template-columns:auto 1fr;gap:0 10px;margin:6px 0 0;font-size:14px}
+#info dt{color:var(--ink-2)} #info dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.zoom{position:absolute;right:12px;top:12px;display:flex;flex-direction:column;overflow:hidden}
+.zoom button{width:38px;height:38px;border:0;background:var(--paper-2);font-family:var(--cond);font-size:22px;font-weight:600;cursor:pointer}
+.zoom button+button{border-top:1px solid var(--rule)}
+.zoom button:hover{background:#fff}
+#toast{left:50%;top:14px;transform:translateX(-50%);padding:8px 14px;font-size:15px;pointer-events:none;opacity:0;transition:opacity .2s;max-width:min(92vw,520px);text-align:center}
+#toast.on{opacity:1}
+#toast.R{border-left:5px solid var(--red)} #toast.D{border-left:5px solid var(--blue)}
+
+#logBox{right:12px;bottom:12px;width:300px;max-height:40%;display:flex;flex-direction:column}
+#logBox summary{list-style:none;cursor:pointer;padding:7px 12px;font-family:var(--cond);font-size:17px;font-weight:600;display:flex;justify-content:space-between}
+#logBox summary::-webkit-details-marker{display:none}
+#logBox summary::after{content:'+';font-size:20px;line-height:1}
+#logBox[open] summary::after{content:'\2212'}
+#logBox ol{margin:0;padding:4px 12px 10px 30px;overflow:auto;font-size:14px;max-height:30vh}
+#logBox li{margin:2px 0}
+#logBox li.R::marker{color:var(--red)} #logBox li.D::marker{color:var(--blue)}
+
+#mover{padding:10px 12px;width:240px;display:none}
+#mover.on{display:block}
+#mover p{margin:0 0 6px;font-size:14px}
+#mover input{width:100%;accent-color:var(--brass)}
+#mover .row{display:flex;gap:8px;margin-top:8px}
+
+/* ---------- bottom bar ---------- */
+footer.bar{display:flex;align-items:center;gap:14px;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:var(--paper-2);border-top:1px solid var(--rule);flex-wrap:wrap}
+.steps{display:flex;gap:0;margin:0;padding:0;list-style:none;font-family:var(--cond);font-size:17px;font-weight:600;counter-reset:s}
+.steps li{counter-increment:s;padding:3px 12px 3px 10px;color:var(--ink-2);border-bottom:3px solid transparent}
+.steps li::before{content:counter(s) ' ';opacity:.6;font-weight:500}
+.steps li.on{color:var(--ink);border-bottom-color:var(--ink)}
+.steps li.on.R{border-bottom-color:var(--red)} .steps li.on.D{border-bottom-color:var(--blue)}
+.prompt{flex:1;min-width:200px;font-size:15px;color:var(--ink-2)}
+.prompt b{color:var(--ink);font-weight:600}
+.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{border:1px solid var(--ink);background:var(--paper-2);padding:6px 14px;border-radius:4px;font-family:var(--cond);font-size:17px;font-weight:600;cursor:pointer;line-height:1.2}
+.btn:hover{background:#fff}
+.btn.go{background:var(--ink);color:var(--paper-2)}
+.btn.go:hover{background:#000}
+.btn[disabled]{opacity:.4;cursor:default}
+.chips{display:flex;border:1px solid var(--ink);border-radius:4px;overflow:hidden}
+.chips button{border:0;background:var(--paper-2);padding:6px 12px;font-family:var(--cond);font-size:17px;font-weight:600;cursor:pointer}
+.chips button+button{border-left:1px solid var(--ink)}
+.chips button[aria-pressed=true]{background:var(--ink);color:var(--paper-2)}
+.linkish{background:none;border:0;padding:0;font-family:var(--cond);font-size:16px;font-weight:600;text-decoration:underline;text-underline-offset:3px;cursor:pointer;color:var(--ink-2)}
+
+/* ---------- dialogs ---------- */
+dialog{border:0;padding:0;background:transparent;max-width:min(640px,94vw);width:100%}
+dialog::backdrop{background:rgba(28,34,41,.45)}
+.sheet{background:var(--paper-2);border-radius:8px;box-shadow:var(--shadow);padding:26px 28px 24px;max-height:90dvh;overflow:auto}
+.sheet h1{font-family:var(--cond);font-weight:700;font-size:64px;line-height:.9;margin:0 0 4px;letter-spacing:-.01em;display:flex}
+.sheet h1 .r{color:var(--red)} .sheet h1 .v{color:var(--ink-2);font-weight:500;font-size:40px;align-self:center;margin:0 10px} .sheet h1 .d{color:var(--blue)}
+.sheet h2{font-family:var(--cond);font-size:30px;margin:0 0 6px;line-height:1.1}
+.sheet h3{font-family:var(--cond);font-size:20px;margin:18px 0 4px}
+.lede{font-size:17px;margin:6px 0 18px;max-width:56ch}
+fieldset{border:0;padding:0;margin:0 0 14px}
+legend{font-family:var(--cond);font-size:18px;font-weight:600;margin-bottom:6px;padding:0}
+.seg{display:flex;flex-wrap:wrap;gap:8px}
+.seg label{position:relative}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg span{display:block;border:1px solid var(--ink);border-radius:4px;padding:6px 14px;font-family:var(--cond);font-size:18px;font-weight:600;cursor:pointer;background:var(--paper-2)}
+.seg input:checked+span{background:var(--ink);color:var(--paper-2)}
+.seg input:focus-visible+span{outline:3px solid var(--brass);outline-offset:2px}
+.seg .R input:checked+span{background:var(--red);border-color:var(--red)}
+.seg .D input:checked+span{background:var(--blue);border-color:var(--blue)}
+.preview{margin:4px 0 4px}
+.preview p{margin:6px 0 0;font-size:15px;color:var(--ink-2)}
+.sheet .foot{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:20px;flex-wrap:wrap}
+.sheet .small{font-size:14px;color:var(--ink-2);max-width:60ch}
+.sheet table{border-collapse:collapse;font-size:15px;margin:6px 0;font-variant-numeric:tabular-nums}
+.sheet th,.sheet td{text-align:left;padding:4px 14px 4px 0;border-bottom:1px solid var(--rule)}
+.sheet th{font-family:var(--cond);font-size:16px}
+.sheet ul{padding-left:20px;margin:6px 0}
+.sheet a{color:var(--blue-deep)}
+
+@media (max-width:720px){
+  header.score{grid-template-columns:1fr 1fr;gap:6px 10px;padding:8px 12px}
+  .mid{grid-column:1/-1;order:3}
+  .side .who{font-size:19px}
+  .steps li{padding:3px 6px}
+  #info{left:8px;right:8px;top:auto;bottom:8px;max-width:none}
+  #logBox{display:none}
+  .sheet{padding:20px 18px}
+  .sheet h1{font-size:48px}
+  footer.bar{gap:8px;padding:8px 12px calc(8px + env(safe-area-inset-bottom))}
+  .prompt{order:3;flex-basis:100%}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="score">
+    <div class="side R" id="sideR"><span class="who">Republican</span><span class="nums"></span></div>
+    <div class="mid">
+      <div class="title"><strong id="modeName">Land</strong><span id="turnNo">Turn 1</span></div>
+      <div class="tug" id="tug" role="img"><span class="r"></span><span class="d"></span></div>
+    </div>
+    <div class="side D" id="sideD"><span class="who">Democratic</span><span class="nums"></span></div>
+  </header>
+
+  <main id="stage">
+    <svg id="map" aria-label="Map of the United States divided into red and blue regions">
+      <defs>
+        <marker id="head" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0 0L10 5L0 10z" fill="#d99a1e"/></marker>
+        <marker id="headInk" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0 0L10 5L0 10z" fill="#1c2229"/></marker>
+        <pattern id="flipR" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="4" height="4" fill="#c4362c"/><rect width="1.1" height="4" fill="#a92a21"/></pattern>
+        <pattern id="flipD" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="4" height="4" fill="#2f5cb8"/><rect width="1.1" height="4" fill="#234a99"/></pattern>
+      </defs>
+      <g id="world">
+        <g id="regions"></g>
+        <path id="states"></path>
+        <path id="nation"></path>
+        <g id="links"></g>
+        <g id="badges"></g>
+        <line id="aiArrow" visibility="hidden"></line>
+        <line id="arrow" visibility="hidden"></line>
+      </g>
+    </svg>
+    <div class="card" id="info" aria-live="polite"></div>
+    <div class="card zoom">
+      <button id="zin" aria-label="Zoom in">+</button>
+      <button id="zout" aria-label="Zoom out">&minus;</button>
+      <button id="zfit" aria-label="Show whole map" title="Show whole map">&#9634;</button>
+    </div>
+    <div class="card" id="toast" role="status"></div>
+    <div class="card" id="mover">
+      <p id="moverText"></p>
+      <input type="range" id="moverRange" min="1" value="1" aria-label="Armies to move">
+      <div class="row"><button class="btn go" id="moverOk">Move</button><button class="btn" id="moverCancel">Cancel</button></div>
+    </div>
+    <details class="card" id="logBox"><summary>Battle log</summary><ol id="log" reversed></ol></details>
+  </main>
+
+  <footer class="bar">
+    <ol class="steps" id="steps"><li data-p="reinforce">Reinforce</li><li data-p="attack">Attack</li><li data-p="fortify">Fortify</li></ol>
+    <div class="prompt" id="prompt"></div>
+    <div class="actions" id="actions"></div>
+    <button class="linkish" id="menuBtn">Menu</button>
+  </footer>
+</div>
+
+<dialog id="startDlg">
+  <form class="sheet" method="dialog" id="startForm">
+    <h1><span class="r">Red</span><span class="v">v</span><span class="d">Blue</span></h1>
+    <p class="lede">The 2024 county map, cut into 246 regions: neighboring counties in a state that voted the same way form one region. Both sides play by the same rules. You choose what the land pays.</p>
+    <fieldset><legend>Play as</legend>
+      <div class="seg">
+        <label class="R"><input type="radio" name="side" value="R" checked><span>Republican red</span></label>
+        <label class="D"><input type="radio" name="side" value="D"><span>Democratic blue</span></label>
+      </div>
+    </fieldset>
+    <fieldset><legend>Opponent</legend>
+      <div class="seg">
+        <label><input type="radio" name="opp" value="ai" checked><span>Computer</span></label>
+        <label><input type="radio" name="opp" value="hot"><span>Friend on this device</span></label>
+      </div>
+    </fieldset>
+    <fieldset><legend>Income by</legend>
+      <div class="seg" id="modeSeg"></div>
+      <div class="preview">
+        <div class="tug" id="previewTug"><span class="r"></span><span class="d"></span></div>
+        <p id="previewText"></p>
+      </div>
+    </fieldset>
+    <div class="foot">
+      <button class="linkish" type="button" id="aboutBtn">How the map was made</button>
+      <div class="actions">
+        <button class="btn" type="button" id="resumeBtn" hidden>Resume game</button>
+        <button class="btn go" type="submit" value="start">Start game</button>
+      </div>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="aboutDlg">
+  <div class="sheet">
+    <h2>How the map was made</h2>
+    <p>Every county takes the color of the party that won it in the 2024 presidential race. Within each state, counties that touch and voted the same way are merged into one region. That gives 246 regions: 66 red and 180 blue. Red regions are few and large; blue regions are many and mostly small.</p>
+    <h3>Rules</h3>
+    <ul>
+      <li>Every region starts with 3 armies.</li>
+      <li>Each turn a side gets 3 armies, plus its share of 30 armies by the income measure you chose, plus 1 for every whole state it holds.</li>
+      <li>Attack a neighboring region by dragging onto it. Battles use Risk-style dice: up to 3 attacking dice against up to 2 defending, highest dice compared, ties to the defender. A drag keeps rolling until one side breaks; the winners march in, leaving one behind.</li>
+      <li>Once per turn, move armies between any two of your regions that connect through your own territory. Moving ends your turn.</li>
+      <li>A side with fewer than 25 regions (10% of the map) collapses and loses.</li>
+      <li>Dashed lines are sea links: Alaska to western Washington, Hawaii to Los Angeles, and islands to their nearest neighbor.</li>
+    </ul>
+    <h3>What the computer found</h3>
+    <p>Two computer players faced off 60 times on each setting, taking turns going first.</p>
+    <table>
+      <thead><tr><th>Income by</th><th>Red share</th><th>Red wins</th><th>Blue wins</th></tr></thead>
+      <tbody id="simTable"></tbody>
+    </table>
+    <p class="small">When income follows land or counties, red's broad territory decides the game. When it follows voters, the two sides are close to even in income, and blue's larger number of regions at the start tips it.</p>
+    <h3>Sources</h3>
+    <ul class="small">
+      <li>County results: 2024 presidential results compiled at <a href="https://github.com/tonmcg/US_County_Level_Election_Results_08-24" target="_blank" rel="noopener">tonmcg/US_County_Level_Election_Results_08-24</a>. Voters means ballots cast for president in the counties a region contains.</li>
+      <li>Shapes: U.S. Census Bureau cartographic boundaries via <a href="https://github.com/topojson/us-atlas" target="_blank" rel="noopener">us-atlas</a>.</li>
+      <li>Alaska and Connecticut don't report presidential results by county, so each is one statewide region. Kalawao County, Hawaii is counted with Maui.</li>
+    </ul>
+    <div class="foot"><span></span><button class="btn go" id="aboutClose">Close</button></div>
+  </div>
+</dialog>
+
+<dialog id="endDlg">
+  <div class="sheet">
+    <h2 id="endTitle"></h2>
+    <p id="endText"></p>
+    <div class="foot"><button class="linkish" type="button" id="endLook">Look at the map</button><button class="btn go" id="endAgain">New game</button></div>
+  </div>
+</dialog>
+
+<script>
+const DATA = /*DATA*/null;
+const SIM = /*SIM*/null;
+</script>
+<script>
+/*ENGINE*/
+</script>
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const NS = 'http://www.w3.org/2000/svg';
+const R = DATA.regions, N = R.length, W = DATA.width, H = DATA.height;
+const NAME = { R: 'Republican', D: 'Democratic' };
+const SHORT = { R: 'Red', D: 'Blue' };
+const fmt = n => n.toLocaleString('en-US');
+const sqmi = km2 => Math.round(km2 * 0.386102);
+
+let g = null;                 // engine state
+let humans = { R: true, D: false };
+let original = R.map(r => r.party);
+let sel = -1, chunk = 1, aiBusy = false, aiSkip = false;
+let view = { x: 0, y: 0, k: 1 };
+
+// ------------------------------------------------------------ map DOM --
+const svg = $('#map'), world = $('#world');
+const regionEls = [], badgeEls = [];
+const gR = $('#regions'), gB = $('#badges'), gL = $('#links');
+R.forEach((r, i) => {
+  const p = document.createElementNS(NS, 'path');
+  p.setAttribute('d', r.d); p.dataset.i = i; p.setAttribute('class', 'region');
+  gR.appendChild(p); regionEls.push(p);
+  const b = document.createElementNS(NS, 'g');
+  b.dataset.i = i; b.setAttribute('class', 'badge');
+  const c = document.createElementNS(NS, 'circle'); c.setAttribute('r', 7);
+  const t = document.createElementNS(NS, 'text');
+  b.append(c, t); gB.appendChild(b); badgeEls.push(b);
+});
+$('#states').setAttribute('d', DATA.stateLines);
+$('#nation').setAttribute('d', DATA.nation);
+for (const [a, b] of DATA.sea) {
+  const l = document.createElementNS(NS, 'line');
+  l.setAttribute('x1', R[a].lx); l.setAttribute('y1', R[a].ly); l.setAttribute('x2', R[b].lx); l.setAttribute('y2', R[b].ly);
+  gL.appendChild(l);
+}
+
+// ----------------------------------------------------------- pan/zoom --
+function fitView() {
+  const box = svg.getBoundingClientRect();
+  const k = Math.min(box.width / W, box.height / H);
+  view = { k: 1, x: 0, y: 0 };
+  base = { s: k, ox: (box.width - W * k) / 2, oy: (box.height - H * k) / 2 };
+  applyView();
+}
+let base = { s: 1, ox: 0, oy: 0 };
+function applyView() {
+  const s = base.s * view.k;
+  world.setAttribute('transform', `translate(${base.ox + view.x},${base.oy + view.y}) scale(${s})`);
+  // badges grow on screen as you zoom in, but more slowly than the map
+  const r = 7.5 / Math.pow(view.k, 0.62) * (1 / Math.max(base.s, .6));
+  const fs = r * 1.25;
+  for (let i = 0; i < N; i++) {
+    badgeEls[i].setAttribute('transform', `translate(${R[i].lx},${R[i].ly})`);
+    const c = badgeEls[i].firstChild, t = badgeEls[i].lastChild;
+    const rr = g && g.armies[i] >= 100 ? r * 1.25 : r;
+    c.setAttribute('r', rr.toFixed(2)); t.setAttribute('font-size', fs.toFixed(2));
+  }
+}
+function zoomAt(px, py, f) {
+  const k2 = Math.min(40, Math.max(1, view.k * f));
+  f = k2 / view.k;
+  const ox = base.ox + view.x, oy = base.oy + view.y;
+  view.x = px - (px - ox) * f - base.ox;
+  view.y = py - (py - oy) * f - base.oy;
+  view.k = k2;
+  clampView(); applyView();
+}
+function clampView() {
+  const box = svg.getBoundingClientRect(), s = base.s * view.k;
+  const minX = box.width - W * s - base.ox - box.width * .4, maxX = box.width * .4 - base.ox;
+  const minY = box.height - H * s - base.oy - box.height * .4, maxY = box.height * .4 - base.oy;
+  if (view.k === 1) { view.x = 0; view.y = 0; return; }
+  view.x = Math.min(maxX, Math.max(minX, view.x));
+  view.y = Math.min(maxY, Math.max(minY, view.y));
+}
+function toMap(cx, cy) {
+  const box = svg.getBoundingClientRect(), s = base.s * view.k;
+  return [(cx - box.left - base.ox - view.x) / s, (cy - box.top - base.oy - view.y) / s];
+}
+svg.addEventListener('wheel', e => {
+  e.preventDefault();
+  const box = svg.getBoundingClientRect();
+  zoomAt(e.clientX - box.left, e.clientY - box.top, Math.exp(-e.deltaY * (e.deltaMode ? 0.05 : 0.0018)));
+}, { passive: false });
+$('#zin').onclick = () => { const b = svg.getBoundingClientRect(); zoomAt(b.width / 2, b.height / 2, 1.6); };
+$('#zout').onclick = () => { const b = svg.getBoundingClientRect(); zoomAt(b.width / 2, b.height / 2, 1 / 1.6); };
+$('#zfit').onclick = fitView;
+addEventListener('resize', () => { const k = view.k; fitView(); });
+
+// pointer handling: drag from your region = order; elsewhere = pan; two fingers = pinch
+const ptrs = new Map();
+let gesture = null; // {type:'pan'|'order'|'pinch', ...}
+function regionAt(cx, cy) {
+  const el = document.elementFromPoint(cx, cy);
+  const host = el && el.closest('[data-i]');
+  return host ? +host.dataset.i : -1;
+}
+svg.addEventListener('pointerdown', e => {
+  svg.setPointerCapture(e.pointerId);
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  hideMover();
+  if (ptrs.size === 2) {
+    const [a, b] = [...ptrs.values()];
+    gesture = { type: 'pinch', d: Math.hypot(a.x - b.x, a.y - b.y), k: view.k };
+    $('#arrow').setAttribute('visibility', 'hidden');
+    return;
+  }
+  const i = regionAt(e.clientX, e.clientY);
+  const canOrder = g && !g.winner && humans[g.player] && !aiBusy && i >= 0 && g.owner[i] === g.player &&
+    ((g.phase === 'attack' && g.armies[i] >= 2) || ((g.phase === 'attack' || g.phase === 'fortify') && g.armies[i] >= 2));
+  gesture = { type: canOrder ? 'order' : 'pan', from: i, sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y, moved: false };
+});
+svg.addEventListener('pointermove', e => {
+  if (!ptrs.has(e.pointerId)) { hover(regionAt(e.clientX, e.clientY)); return; }
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (!gesture) return;
+  if (gesture.type === 'pinch' && ptrs.size === 2) {
+    const [a, b] = [...ptrs.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y), box = svg.getBoundingClientRect();
+    zoomAt((a.x + b.x) / 2 - box.left, (a.y + b.y) / 2 - box.top, (gesture.k * d / gesture.d) / view.k);
+    return;
+  }
+  const dx = e.clientX - gesture.sx, dy = e.clientY - gesture.sy;
+  if (!gesture.moved && Math.hypot(dx, dy) < 6) return;
+  gesture.moved = true;
+  if (gesture.type === 'pan') {
+    svg.classList.add('dragging');
+    view.x = gesture.vx + dx; view.y = gesture.vy + dy; clampView(); applyView();
+  } else if (gesture.type === 'order') {
+    const a = R[gesture.from], [mx, my] = toMap(e.clientX, e.clientY);
+    const ar = $('#arrow');
+    ar.setAttribute('x1', a.lx); ar.setAttribute('y1', a.ly); ar.setAttribute('x2', mx); ar.setAttribute('y2', my);
+    ar.setAttribute('visibility', 'visible');
+    select(gesture.from);
+    hover(regionAt(e.clientX, e.clientY));
+  }
+});
+function endPtr(e) {
+  if (!ptrs.has(e.pointerId)) return;
+  ptrs.delete(e.pointerId);
+  svg.classList.remove('dragging');
+  const gs = gesture;
+  if (ptrs.size > 0) { if (gs && gs.type === 'pinch') gesture = null; return; }
+  gesture = null;
+  $('#arrow').setAttribute('visibility', 'hidden');
+  if (!gs || gs.type === 'pinch' || e.type === 'pointercancel') return;
+  const i = regionAt(e.clientX, e.clientY);
+  if (gs.type === 'order' && gs.moved) { order(gs.from, i, e.clientX, e.clientY); return; }
+  if (!gs.moved) tap(i, e.clientX, e.clientY);
+}
+svg.addEventListener('pointerup', endPtr);
+svg.addEventListener('pointercancel', endPtr);
+svg.addEventListener('pointerleave', () => { if (!ptrs.size) hover(-1); });
+
+// ------------------------------------------------------------ actions --
+function tap(i, cx, cy) {
+  if (!g || g.winner || aiBusy || !humans[g.player] || i < 0) { select(i); return; }
+  if (g.phase === 'reinforce') {
+    if (g.owner[i] !== g.player) { select(i); return; }
+    const n = E.place(g, i, chunk === 'all' ? g.reserve : chunk);
+    if (n) pulse(i);
+    select(i); render(); save();
+    return;
+  }
+  // tap-to-order: tap your region, then tap a target
+  const mine = g.owner[i] === g.player;
+  if (sel >= 0 && sel !== i && g.owner[sel] === g.player && (!mine || g.phase === 'fortify')) { order(sel, i, cx, cy); return; }
+  select(i);
+}
+
+function order(from, to, cx, cy) {
+  if (to < 0 || from === to) { select(from); return; }
+  if (g.owner[to] !== g.player) {
+    if (g.phase !== 'attack') { toast('Attacks are over for this turn. Move troops or end your turn.'); return; }
+    if (!E.adj(g, from).includes(to)) { toast(`${R[to].name} doesn't border ${R[from].name}.`); return; }
+    if (g.armies[from] < 2) { toast('You need at least 2 armies to attack.'); return; }
+    const res = E.blitz(g, from, to);
+    report(res); select(res.captured ? to : from); render(); save(); checkEnd();
+  } else {
+    if (!E.ownPath(g, from, to)) { toast(`${R[from].name} isn't connected to ${R[to].name} through your territory.`); return; }
+    if (g.armies[from] < 2) { toast('Leave at least one army behind.'); return; }
+    showMover(from, to, cx, cy);
+  }
+}
+
+function report(res) {
+  const p = g.owner[res.from], tn = R[res.to].name;
+  const msg = res.captured
+    ? `${SHORT[p]} took ${tn}. Lost ${res.lostA}, destroyed ${res.lostD}.`
+    : `${SHORT[p]} failed to take ${tn}. Lost ${res.lostA}, destroyed ${res.lostD}.`;
+  toast(msg, p); logLine(msg, p); pulse(res.to);
+}
+
+let mv = null;
+function showMover(from, to, cx, cy) {
+  mv = { from, to };
+  const m = $('#mover'), rng = $('#moverRange'), max = g.armies[from] - 1;
+  rng.max = max; rng.value = max;
+  const upd = () => { $('#moverText').textContent = `Move ${rng.value} of ${max} from ${R[from].name} to ${R[to].name}. This ends your turn.`; $('#moverOk').textContent = `Move ${rng.value}`; };
+  rng.oninput = upd; upd();
+  const box = $('#stage').getBoundingClientRect();
+  m.classList.add('on');
+  m.style.left = Math.min(box.width - 252, Math.max(8, cx - box.left - 120)) + 'px';
+  m.style.top = Math.min(box.height - 150, Math.max(8, cy - box.top + 14)) + 'px';
+  $('#moverOk').focus();
+}
+function hideMover() { $('#mover').classList.remove('on'); mv = null; }
+$('#moverOk').onclick = () => {
+  if (!mv) return;
+  const n = +$('#moverRange').value, { from, to } = mv;
+  hideMover();
+  if (E.fortify(g, from, to, n)) { logLine(`${SHORT[g.owner[to]]} moved ${n} into ${R[to].name}.`, g.owner[to]); afterTurn(); }
+};
+$('#moverCancel').onclick = hideMover;
+
+function afterTurn() { sel = -1; render(); save(); maybeAI(); announceTurn(); }
+function announceTurn() {
+  if (!g.winner && humans[g.player] && humans[E.other(g.player)]) toast(`${NAME[g.player]} turn. ${g.reserve} armies to place.`, g.player);
+}
+
+// ----------------------------------------------------------------- AI --
+const sleep = ms => new Promise(r => setTimeout(r, aiSkip ? 0 : ms));
+async function maybeAI() {
+  if (!g || g.winner || humans[g.player] || aiBusy) return;
+  aiBusy = true; aiSkip = false; render();
+  const me = g.player;
+  await sleep(350);
+  // reinforce, showing where armies land
+  const before = g.armies.slice();
+  E.aiReinforce(g);
+  g.armies.forEach((a, i) => { if (a !== before[i]) pulse(i); });
+  render(); await sleep(600);
+  let guard = 0;
+  const arrow = $('#aiArrow');
+  while (g.phase === 'attack' && guard++ < 400) {
+    const snapshot = { owner: g.owner.slice(), armies: g.armies.slice() };
+    const res = E.aiAttackStep(g);
+    if (!res) break;
+    if (!aiSkip) {
+      // show the arrow first, then the outcome
+      const after = { owner: g.owner.slice(), armies: g.armies.slice() };
+      g.owner = snapshot.owner; g.armies = snapshot.armies; render();
+      arrow.setAttribute('x1', R[res.from].lx); arrow.setAttribute('y1', R[res.from].ly);
+      arrow.setAttribute('x2', R[res.to].lx); arrow.setAttribute('y2', R[res.to].ly);
+      arrow.setAttribute('visibility', 'visible');
+      await sleep(260);
+      g.owner = after.owner; g.armies = after.armies;
+      arrow.setAttribute('visibility', 'hidden');
+    }
+    report(res); render();
+    if (g.winner) break;
+    await sleep(220);
+  }
+  arrow.setAttribute('visibility', 'hidden');
+  if (!g.winner) {
+    E.endAttacks(g);
+    const t = g.player; const before2 = g.armies.slice();
+    E.aiFortify(g);
+    const moved = before2.map((a, i) => g.armies[i] - a).findIndex(d => d > 0);
+    if (moved >= 0) logLine(`${SHORT[me]} moved ${g.armies[moved] - before2[moved]} into ${R[moved].name}.`, me);
+  }
+  aiBusy = false;
+  render(); save(); checkEnd();
+  if (!g.winner) { if (!humans[g.player]) maybeAI(); else toast(`Your turn. ${g.reserve} armies to place.`, g.player); }
+}
+
+// ------------------------------------------------------------- render --
+function select(i) {
+  if (sel >= 0) { regionEls[sel].classList.remove('sel'); badgeEls[sel].classList.remove('sel'); }
+  regionEls.forEach(el => el.classList.remove('tgt'));
+  sel = i;
+  if (i >= 0) {
+    regionEls[i].classList.add('sel'); badgeEls[i].classList.add('sel');
+    gR.appendChild(regionEls[i]); // lift outline above neighbors
+    if (g && humans[g.player] && g.owner[i] === g.player && g.phase === 'attack' && g.armies[i] >= 2)
+      E.adj(g, i).forEach(j => { if (g.owner[j] !== g.player) regionEls[j].classList.add('tgt'); });
+    info(i);
+  }
+}
+function hover(i) { info(i >= 0 ? i : sel); }
+function info(i) {
+  const box = $('#info');
+  if (i < 0 || !g) { box.classList.remove('on'); return; }
+  const r = R[i], p = g.owner[i];
+  const was = original[i] !== p ? ` <span style="color:var(--ink-2);font-weight:500">(was ${SHORT[original[i]].toLowerCase()})</span>` : '';
+  box.innerHTML = `<div class="nm">${r.name}</div>
+    <div class="hold ${p}">${NAME[p]}, ${g.armies[i]} ${g.armies[i] === 1 ? 'army' : 'armies'}${was}</div>
+    <dl><dt>Land</dt><dd>${fmt(sqmi(r.areaKm2))} sq mi</dd>
+    <dt>Counties</dt><dd>${r.counties}</dd>
+    <dt>Voters, 2024</dt><dd>${fmt(r.ballots)}</dd>
+    <dt>Neighbors</dt><dd>${r.adj.length}</dd></dl>`;
+  box.classList.add('on');
+}
+function pulse(i) { const b = badgeEls[i]; b.classList.remove('pulse'); void b.getBBox(); b.classList.add('pulse'); }
+
+function render() {
+  if (!g) return;
+  for (let i = 0; i < N; i++) {
+    const p = g.owner[i];
+    const cls = 'region ' + p + (p !== original[i] ? ' flip' : '') + (i === sel ? ' sel' : '');
+    if (regionEls[i].getAttribute('class') !== cls) regionEls[i].setAttribute('class', cls);
+    const b = badgeEls[i];
+    b.setAttribute('class', 'badge ' + p + (i === sel ? ' sel' : '') + (b.classList.contains('pulse') ? ' pulse' : ''));
+    if (b.lastChild.textContent !== String(g.armies[i])) b.lastChild.textContent = g.armies[i];
+  }
+  applyView();
+  const c = E.counts(g);
+  for (const p of ['R', 'D']) {
+    const inc = E.income(g, p), el = $('#side' + p);
+    el.classList.toggle('turn', g.player === p && !g.winner);
+    el.querySelector('.who').textContent = NAME[p] + (humans[p] && !humans[E.other(p)] ? ' (you)' : '');
+    el.querySelector('.nums').innerHTML = `<b>${c[p].regions}</b> regions, <b>${fmt(c[p].armies)}</b> armies, <b>+${inc.total}</b> a turn`;
+  }
+  const sr = E.share(g, 'R');
+  setTug($('#tug'), sr);
+  $('#tug').setAttribute('aria-label', `${E.MODES[g.mode].label} held: red ${pct(sr)}, blue ${pct(1 - sr)}`);
+  $('#modeName').textContent = `${E.MODES[g.mode].label} held`;
+  $('#turnNo').textContent = `Turn ${g.turn}`;
+  // steps + prompt + actions
+  document.querySelectorAll('#steps li').forEach(li => { li.className = li.dataset.p === g.phase ? 'on ' + g.player : ''; });
+  const P = $('#prompt'), A = $('#actions');
+  A.innerHTML = '';
+  if (g.winner) { P.innerHTML = `<b>${NAME[g.winner]} wins.</b>`; A.append(btn('New game', openStart, true)); return; }
+  if (aiBusy) { P.innerHTML = `<b>${NAME[g.player]}</b> (computer) is moving.`; A.append(btn('Skip ahead', () => { aiSkip = true; })); return; }
+  const who = humans[E.other(g.player)] ? `<b>${NAME[g.player]}:</b> ` : '';
+  if (g.phase === 'reinforce') {
+    P.innerHTML = `${who}Place <b>${g.reserve}</b> ${g.reserve === 1 ? 'army' : 'armies'}. Tap your regions.`;
+    const chips = document.createElement('div'); chips.className = 'chips'; chips.setAttribute('role', 'group'); chips.setAttribute('aria-label', 'Armies per tap');
+    for (const v of [1, 5, 'all']) {
+      const b = document.createElement('button'); b.textContent = v === 'all' ? 'All' : '+' + v;
+      b.setAttribute('aria-pressed', chunk === v); b.onclick = () => { chunk = v; render(); };
+      chips.append(b);
+    }
+    A.append(chips, btn('Auto-place', () => { const b4 = g.armies.slice(); E.aiReinforce(g); g.armies.forEach((a, i) => a !== b4[i] && pulse(i)); render(); save(); }));
+  } else if (g.phase === 'attack') {
+    P.innerHTML = `${who}Drag from your region onto a neighbor to attack, or tap one then the other.`;
+    A.append(btn('Done attacking', () => { E.endAttacks(g); select(-1); render(); save(); }, true));
+  } else if (g.phase === 'fortify') {
+    P.innerHTML = `${who}Drag between two of your regions to move troops once, or end the turn.`;
+    A.append(btn('End turn', () => { E.endTurn(g); afterTurn(); }, true));
+  }
+}
+function btn(label, fn, go) { const b = document.createElement('button'); b.className = 'btn' + (go ? ' go' : ''); b.textContent = label; b.onclick = fn; return b; }
+const pct = x => Math.round(x * 100) + '%';
+function setTug(el, sr) {
+  const [r, d] = el.children;
+  r.style.flexBasis = (sr * 100) + '%'; d.style.flexBasis = ((1 - sr) * 100) + '%';
+  const lab = (name, x) => x >= 0.2 ? name + ' ' + pct(x) : x >= 0.07 ? pct(x) : '';
+  r.textContent = lab('Red', sr); d.textContent = lab('Blue', 1 - sr);
+}
+
+let toastT;
+function toast(msg, p) {
+  const t = $('#toast'); t.textContent = msg; t.className = 'card on ' + (p || '');
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2600);
+}
+function logLine(msg, p) {
+  const li = document.createElement('li'); li.textContent = `Turn ${g.turn}: ${msg}`; li.className = p;
+  const ol = $('#log'); ol.prepend(li); while (ol.children.length > 60) ol.lastChild.remove();
+}
+
+function checkEnd() {
+  if (!g.winner) return;
+  const w = g.winner, m = E.MODES[g.mode];
+  $('#endTitle').textContent = `${NAME[w]} wins in ${g.turn} turns`;
+  const youWon = humans[w] && !humans[E.other(w)], youLost = !humans[w] && humans[E.other(w)];
+  const lead = youWon ? 'You win. ' : youLost ? 'You lose. ' : '';
+  const startShare = startShares[g.mode];
+  $('#endText').textContent = `${lead}${NAME[E.other(w)]} fell below ${E.collapseAt(g)} regions. Income followed ${m.label.toLowerCase()} this game, where red started with ${pct(startShare)} of the total and blue with ${pct(1 - startShare)}. Try another income setting to see how the same map plays differently.`;
+  try { localStorage.removeItem(SAVE); } catch (e) {}
+  $('#endDlg').showModal();
+}
+$('#endAgain').onclick = () => { $('#endDlg').close(); openStart(); };
+$('#endLook').onclick = () => $('#endDlg').close();
+
+// ------------------------------------------------------- start screen --
+const startShares = {};
+for (const k of Object.keys(E.MODES)) {
+  const key = E.MODES[k].key, tot = R.reduce((s, r) => s + r[key], 0);
+  startShares[k] = R.reduce((s, r) => s + (r.party === 'R' ? r[key] : 0), 0) / tot;
+}
+const modeSeg = $('#modeSeg');
+for (const [k, m] of Object.entries(E.MODES)) {
+  const l = document.createElement('label');
+  l.innerHTML = `<input type="radio" name="mode" value="${k}" ${k === 'land' ? 'checked' : ''}><span>${m.label}</span>`;
+  modeSeg.append(l);
+}
+function preview() {
+  const k = $('#startForm').elements.mode.value, sr = startShares[k];
+  setTug($('#previewTug'), sr);
+  const probe = E.newGame(DATA, k);
+  $('#previewText').textContent = `${E.MODES[k].blurb} Red opens with +${E.income(probe, 'R').total} a turn, blue with +${E.income(probe, 'D').total}. Blue starts with ${R.filter(r => r.party === 'D').length} regions to red's ${R.filter(r => r.party === 'R').length}.`;
+}
+$('#startForm').addEventListener('change', preview);
+function openStart() {
+  let saved = null; try { saved = JSON.parse(localStorage.getItem(SAVE)); } catch (e) {}
+  const rb = $('#resumeBtn');
+  rb.hidden = !saved; if (saved) rb.textContent = `Resume turn ${saved.turn}`;
+  preview();
+  $('#startDlg').showModal();
+}
+$('#startForm').addEventListener('submit', e => {
+  const f = e.target.elements;
+  const side = f.side.value, hot = f.opp.value === 'hot';
+  humans = hot ? { R: true, D: true } : { R: side === 'R', D: side === 'D' };
+  start(f.mode.value);
+});
+$('#resumeBtn').onclick = () => { $('#startDlg').close(); load(); };
+$('#aboutBtn').onclick = () => $('#aboutDlg').showModal();
+$('#aboutClose').onclick = () => $('#aboutDlg').close();
+$('#menuBtn').onclick = openStart;
+
+function start(mode) {
+  g = E.newGame(DATA, mode);
+  original = R.map(r => r.party);
+  $('#log').innerHTML = '';
+  sel = -1; chunk = 1; aiBusy = false;
+  fitView(); render(); save();
+  if (humans[g.player]) toast(`${humans[E.other(g.player)] ? NAME[g.player] + ' goes first.' : 'You go first.'} Place ${g.reserve} armies.`, g.player);
+  maybeAI();
+}
+
+// -------------------------------------------------------------- save --
+const SAVE = 'redvblue-save-v1';
+function save() {
+  if (!g || g.winner) return;
+  try { localStorage.setItem(SAVE, JSON.stringify({ mode: g.mode, owner: g.owner, armies: g.armies, turn: g.turn, player: g.player, phase: g.phase, reserve: g.reserve, humans })); } catch (e) {}
+}
+function load() {
+  let s; try { s = JSON.parse(localStorage.getItem(SAVE)); } catch (e) { return; }
+  if (!s || s.owner.length !== N) return;
+  g = E.newGame(DATA, s.mode);
+  Object.assign(g, { owner: s.owner, armies: s.armies, turn: s.turn, player: s.player, phase: s.phase, reserve: s.reserve });
+  humans = s.humans; original = R.map(r => r.party);
+  fitView(); render(); maybeAI();
+}
+
+// sim results table (computed at build time)
+$('#simTable').innerHTML = Object.entries(SIM).map(([k, s]) =>
+  `<tr><td>${E.MODES[k].label}</td><td>${pct(startShares[k])}</td><td>${s.R}</td><td>${s.D}</td></tr>`).join('');
+
+addEventListener('keydown', e => {
+  if (e.key === 'Escape') { hideMover(); select(-1); }
+});
+
+fitView();
+// show the opening board behind the start screen
+g = E.newGame(DATA, 'land'); render(); g = null;
+openStart();
+})();
+</script>
+</body>
+</html>
