@@ -1,6 +1,8 @@
 # Red v Blue
 
-A territory strategy game on the 2024 U.S. county map. Play it at the Vercel link in the repo description.
+A territory strategy game on the 2024 U.S. county map.
+
+**[Play Red v Blue](https://redvblue-zeta.vercel.app/)**
 
 Every county takes the color of the party that won it in the 2024 presidential race. Within each state, neighboring counties that voted the same way are merged into one region, giving 246 regions: 66 red and 180 blue. Both sides play by identical rules. The one setting that changes is what the land pays:
 
